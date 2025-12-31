@@ -1,3 +1,4 @@
+
 export enum EventType {
   JOURNEE = 'Journée',
   SOIREE = 'Soirée',
@@ -24,6 +25,7 @@ export interface EventData {
   attendees: string[];
   maxParticipants: number;
   location?: EventLocation;
+  isAiGenerated?: boolean;
 }
 
 export interface GeminiEventResponse {
@@ -32,4 +34,5 @@ export interface GeminiEventResponse {
   description: string;
   icon: string;
   maxParticipants: number;
+  isAiGenerated?: boolean;
 }

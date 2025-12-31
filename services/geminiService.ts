@@ -8,18 +8,16 @@ export const generateEventIdeas = async (
   userProvidedName?: string,
   usedIcons: string[] = []
 ): Promise<GeminiEventResponse> => {
-  // On utilise directement la clé de l'environnement
   const apiKey = process.env.API_KEY;
   
-  // Si vraiment aucune clé n'est présente, on garde un fallback discret mais fonctionnel
   if (!apiKey) {
-    console.error("ERREUR : La variable d'environnement API_KEY est introuvable. Vérifiez vos paramètres Vercel.");
     return {
       title: userProvidedName || `${type} de ${month}`,
       date: `Le 15 ${month}`,
-      description: "L'IA est prête mais la clé API n'est pas détectée sur Vercel. Vérifiez vos variables d'environnement.",
-      icon: "⚙️",
-      maxParticipants: 4
+      description: "⚠️ Variable 'API_KEY' manquante sur Vercel. L'IA ne peut pas répondre.",
+      icon: "❌",
+      maxParticipants: 4,
+      isAiGenerated: false
     };
   }
 
@@ -29,19 +27,9 @@ export const generateEventIdeas = async (
     ? `L'utilisateur veut organiser un événement nommé "${userProvidedName}" pour le mois de ${month} de type "${type}".`
     : `Génère une idée d'événement créative et originale pour le mois de ${month} de type "${type}".`;
 
-  const exclusionPrompt = usedIcons.length > 0 
-    ? `IMPORTANT : Ne choisis PAS un émoji parmi ceux-ci : ${usedIcons.join(', ')}.`
-    : '';
-
   const prompt = `${basePrompt} 
-    Propose :
-    1. Un titre accrocheur.
-    2. Une date précise (ex: "Samedi 14 ${month}").
-    3. Une description très courte et fun (max 150 caractères).
-    4. Un émoji unique en rapport direct avec l'activité.
-    5. Un nombre maximum de participants logique.
-    ${exclusionPrompt}
-    Réponds uniquement au format JSON.`;
+    Propose : Un titre, une date précise en ${month}, une description courte (150 car. max), un émoji et un nombre de participants.
+    Réponds UNIQUEMENT en JSON.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -63,22 +51,21 @@ export const generateEventIdeas = async (
       },
     });
 
-    const text = response.text || "{}";
-    return JSON.parse(text);
+    const data = JSON.parse(response.text || "{}");
+    return { ...data, isAiGenerated: true };
   } catch (error: any) {
-    console.error("Erreur lors de l'appel Gemini:", error);
+    console.error("Détail erreur Gemini:", error);
+    let msg = "Erreur technique IA.";
+    if (error?.message?.includes("401")) msg = "Clé API invalide ou expirée.";
+    if (error?.message?.includes("429")) msg = "Quota dépassé (trop de requêtes).";
     
-    // Si l'erreur est liée à une clé invalide ou manquante
-    const errorMessage = error?.message?.includes("API key not found") 
-      ? "Clé API non trouvée. Vérifiez Vercel." 
-      : "Gemini est temporairement indisponible.";
-
     return {
       title: userProvidedName || `${type} de ${month}`,
       date: `Courant ${month}`,
-      description: errorMessage,
-      icon: "📅",
-      maxParticipants: 4
+      description: `Fallback: ${msg}`,
+      icon: "⚠️",
+      maxParticipants: 4,
+      isAiGenerated: false
     };
   }
 };
@@ -87,28 +74,16 @@ export const suggestLocation = async (eventTitle: string, month: string): Promis
   const apiKey = process.env.API_KEY;
   if (!apiKey) return { name: "Lieu à définir" };
 
-  const ai = new GoogleGenAI({ apiKey });
-  
   try {
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Où pourrait-on organiser l'événement "${eventTitle}" en ${month} ? Sois précis.`,
-      config: {
-        tools: [{ googleMaps: {} }],
-      },
+      contents: `Où organiser "${eventTitle}" en ${month} ?`,
+      config: { tools: [{ googleMaps: {} }] },
     });
-
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
     const mapsChunk = chunks?.find(chunk => chunk.maps);
-
-    if (mapsChunk) {
-      return {
-        name: mapsChunk.maps.title || "Lieu suggéré",
-        mapsUri: mapsChunk.maps.uri
-      };
-    }
-  } catch (error) {
-    console.warn("Erreur suggestion lieu:", error);
-  }
+    if (mapsChunk) return { name: mapsChunk.maps.title, mapsUri: mapsChunk.maps.uri };
+  } catch (e) { /* ignore silent */ }
   return { name: "Lieu à définir" };
 };
