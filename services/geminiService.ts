@@ -8,9 +8,19 @@ export const generateEventIdeas = async (
   userProvidedName?: string,
   usedIcons: string[] = []
 ): Promise<GeminiEventResponse> => {
-  const apiKey = process.env.API_KEY;
+  // On récupère la clé de manière sécurisée sans planter si process est undefined
+  const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : undefined;
+  
+  // Si pas de clé, on utilise directement le fallback pour ne pas faire attendre l'utilisateur
   if (!apiKey) {
-    throw new Error("L'API Key n'est pas configurée correctement sur le serveur.");
+    console.warn("API_KEY manquante. Utilisation du mode sans IA.");
+    return {
+      title: userProvidedName || `${type} de ${month}`,
+      date: `Le 15 ${month}`,
+      description: "Événement créé en mode local (IA non configurée).",
+      icon: "📅",
+      maxParticipants: 4
+    };
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -49,16 +59,14 @@ export const generateEventIdeas = async (
     });
 
     const text = response.text || "{}";
-    // Nettoyage agressif du JSON si l'IA renvoie du Markdown malgré les consignes
     const cleanedJson = text.replace(/```json|```/g, "").trim();
     return JSON.parse(cleanedJson);
   } catch (error: any) {
-    console.error("Gemini API Error (Idea Generation):", error);
-    // Fallback robuste pour que le bouton "Créer" fonctionne toujours
+    console.error("Gemini API Error:", error);
     return {
       title: userProvidedName || `${type} de ${month}`,
       date: `Le 15 ${month}`,
-      description: "Un événement généré automatiquement faute de connexion au cerveau de l'IA.",
+      description: "Un événement généré faute de réponse de l'IA.",
       icon: "📅",
       maxParticipants: 4
     };
@@ -66,8 +74,8 @@ export const generateEventIdeas = async (
 };
 
 export const suggestLocation = async (eventTitle: string, month: string): Promise<EventLocation | undefined> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) return undefined;
+  const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : undefined;
+  if (!apiKey) return { name: "Lieu à définir" };
 
   const ai = new GoogleGenAI({ apiKey });
   
@@ -90,7 +98,7 @@ export const suggestLocation = async (eventTitle: string, month: string): Promis
       };
     }
   } catch (error) {
-    console.warn("Location suggestion skipped due to error:", error);
+    console.warn("Location suggestion error:", error);
   }
   return { name: "Lieu à définir" };
 };
