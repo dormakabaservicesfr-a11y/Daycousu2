@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { EventType, GeminiEventResponse, EventLocation } from "../types";
 
@@ -7,6 +8,7 @@ export const generateEventIdeas = async (
   userProvidedName?: string,
   usedIcons: string[] = []
 ): Promise<GeminiEventResponse> => {
+  // On initialise l'instance juste avant l'appel
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const basePrompt = userProvidedName 
@@ -75,9 +77,9 @@ export const generateEventIdeas = async (
       [EventType.JOURNEE]: ['☀️', '🏙️', '🍎', '🥪', '🚶', '🏸', '📷'],
       [EventType.SOIREE]: ['🌙', '🍷', '🍸', '🍻', '🥂', '💃', '🕺', '🎸', '🎵'],
       [EventType.WEEKEND]: ['📅', '🚗', '⛺', '🚵', '🛶', '🎒', '🥪'],
-      [EventType.VACANCES]: ['🏖️', '✈️', '🚢', '🌴', '🕶️', 'COCO', '🍦', '🌍'],
+      [EventType.VACANCES]: ['🏖️', '✈️', '🚢', '🌴', '🕶️', '🍦', '🌍'],
       [EventType.ACTIVITE]: ['🏃', '🎾', '🏀', '⚽', '🎨', '♟️', '🎮', '🧩'],
-      [EventType.ANNIVERSAIRE]: ['🎂', '🍰', '🧁', '🎁', '🎈', '🎉', '🥳', '🍰']
+      [EventType.ANNIVERSAIRE]: ['🎂', '🍰', '🧁', '🎁', '🎈', '🎉', '🥳']
     };
 
     const typePool = pool[type] || ['✨'];
