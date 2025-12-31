@@ -17,6 +17,9 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   
+  <!-- Gun.js pour la base de données partagée temps réel -->
+  <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+  
   <style>
     body {
       font-family: 'Plus Jakarta Sans', sans-serif;
@@ -40,6 +43,14 @@
     html, body {
       overflow-x: hidden;
       position: relative;
+    }
+    .sync-indicator {
+      animation: pulse-green 2s infinite;
+    }
+    @keyframes pulse-green {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+      70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
     }
   </style>
 

@@ -1,12 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { MONTHS, EVENT_TYPES, MONTH_THEMES } from './constants.tsx';
 import { EventType, EventData } from './types.ts';
 import { generateEventIdeas, suggestLocation } from './services/geminiService.ts';
 import EventBubble from './components/EventBubble.tsx';
 import RegistrationModal from './components/RegistrationModal.tsx';
 
-const STORAGE_KEY = 'day_app_events_v1';
+// On déclare Gun globalement (chargé via script tag dans index.html)
+declare var Gun: any;
 
 const App: React.FC = () => {
   const [events, setEvents] = useState<EventData[]>([]);
@@ -15,42 +16,75 @@ const App: React.FC = () => {
   const [selectedType, setSelectedType] = useState<EventType | ''>('');
   const [loading, setLoading] = useState(false);
   const [activeEvent, setActiveEvent] = useState<EventData | null>(null);
+  const [gun, setGun] = useState<any>(null);
 
-  // Charger les événements au montage du composant
+  // Initialisation de Gun.js pour la synchro temps réel
   useEffect(() => {
-    try {
-      const savedEvents = localStorage.getItem(STORAGE_KEY);
-      if (savedEvents) {
-        setEvents(JSON.parse(savedEvents));
-      }
-    } catch (err) {
-      console.error("Erreur lors du chargement des événements :", err);
-    }
+    // Utilisation de relais publics pour la synchronisation partagée
+    const gunInstance = Gun([
+      'https://gun-manhattan.herokuapp.com/gun',
+      'https://relay.peer.ooo/gun'
+    ]);
+    const eventsNode = gunInstance.get('day_app_shared_db_v1');
+    setGun(eventsNode);
+
+    // Écouter les changements en temps réel
+    eventsNode.map().on((data: any, id: string) => {
+      setEvents(currentEvents => {
+        if (!data) {
+          // Si data est null, l'événement a été supprimé
+          return currentEvents.filter(e => e.id !== id);
+        }
+        
+        // On s'assure que les données sont valides
+        const eventData = { ...data, id };
+        const exists = currentEvents.find(e => e.id === id);
+        
+        if (exists) {
+          // Mise à jour de l'existant (uniquement si changement réel pour éviter boucles)
+          if (JSON.stringify(exists) === JSON.stringify(eventData)) return currentEvents;
+          return currentEvents.map(e => e.id === id ? eventData : e);
+        } else {
+          // Ajout du nouvel événement
+          return [...currentEvents, eventData];
+        }
+      });
+    });
+
+    return () => {
+      eventsNode.off();
+    };
   }, []);
 
-  // Sauvegarder les événements à chaque modification
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
-    } catch (err) {
-      console.error("Erreur lors de la sauvegarde des événements :", err);
-    }
-  }, [events]);
-
   const handleAddEvent = async () => {
-    if (!selectedMonth || !selectedType) return;
+    console.log("Tentative de création d'événement...", { selectedMonth, selectedType, inputName });
+    if (!selectedMonth || !selectedType || !gun) {
+      console.warn("Champs manquants ou base de données non prête");
+      return;
+    }
 
     setLoading(true);
     try {
       const usedIcons = events.map(e => e.icon);
       
+      console.log("Appel Gemini pour les idées...");
       const idea = await generateEventIdeas(selectedMonth, selectedType, inputName, usedIcons);
+      console.log("Idée reçue:", idea);
       
       const finalTitle = inputName.trim() || idea.title;
-      const location = await suggestLocation(finalTitle, selectedMonth);
+      
+      // Tentative de suggestion de lieu (on n'attend pas forcément le succès pour créer)
+      let location = { name: "Lieu à définir" };
+      try {
+        const suggested = await suggestLocation(finalTitle, selectedMonth);
+        if (suggested) location = suggested;
+      } catch (locErr) {
+        console.warn("Erreur suggestion lieu, utilisation défaut:", locErr);
+      }
 
+      const id = Math.random().toString(36).substr(2, 9);
       const newEvent: EventData = {
-        id: Math.random().toString(36).substr(2, 9),
+        id,
         title: finalTitle,
         date: idea.date,
         description: idea.description,
@@ -62,66 +96,71 @@ const App: React.FC = () => {
         location: location
       };
 
-      setEvents(prev => [...prev, newEvent]);
+      // Sauvegarde dans Gun.js (partage instantané)
+      console.log("Sauvegarde dans la DB partagée...");
+      gun.get(id).put(newEvent);
+      
       setInputName('');
+      console.log("Événement créé avec succès !");
       
       setTimeout(() => {
         const monthElement = document.getElementById(`month-${selectedMonth}`);
         monthElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 100);
 
-    } catch (err) {
-      console.error("Failed to add event:", err);
-      alert("Erreur lors de la création. Vérifiez votre connexion ou réessayez.");
+    } catch (err: any) {
+      console.error("Erreur critique lors de handleAddEvent:", err);
+      alert(`Erreur: ${err.message || "Problème de connexion"}. Veuillez vérifier la console.`);
     } finally {
       setLoading(false);
     }
   };
 
   const handleRegister = (name: string) => {
-    if (activeEvent) {
-      const updatedEvent = { ...activeEvent, attendees: [...activeEvent.attendees, name] };
-      setEvents(prev => prev.map(e => 
-        e.id === activeEvent.id ? updatedEvent : e
-      ));
-      setActiveEvent(updatedEvent);
+    if (activeEvent && gun) {
+      const updatedAttendees = [...(activeEvent.attendees || []), name];
+      gun.get(activeEvent.id).get('attendees').put(updatedAttendees);
     }
   };
 
   const handleUnregister = (index: number) => {
-    if (activeEvent) {
-      const newAttendees = [...activeEvent.attendees];
+    if (activeEvent && gun) {
+      const newAttendees = [...(activeEvent.attendees || [])];
       newAttendees.splice(index, 1);
-      const updatedEvent = { ...activeEvent, attendees: newAttendees };
-      setEvents(prev => prev.map(e => 
-        e.id === activeEvent.id ? updatedEvent : e
-      ));
-      setActiveEvent(updatedEvent);
+      gun.get(activeEvent.id).get('attendees').put(newAttendees);
     }
   };
 
   const handleDeleteEvent = (id: string) => {
-    setEvents(prev => prev.filter(event => event.id !== id));
+    if (gun) {
+      gun.get(id).put(null); // Gun.js : mettre à null pour supprimer
+    }
   };
 
   const handleUpdateField = (id: string, field: keyof EventData, value: any) => {
-    setEvents(prev => prev.map(e => e.id === id ? { ...e, [field]: value } : e));
+    if (gun) {
+      gun.get(id).get(field).put(value);
+    }
   };
 
   const handleUpdateLocation = (locationName: string) => {
-    if (activeEvent) {
+    if (activeEvent && gun) {
       const updatedLocation = {
-        ...activeEvent.location,
         name: locationName,
         mapsUri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationName)}`
       };
-      handleUpdateField(activeEvent.id, 'location', updatedLocation);
-      setActiveEvent({ ...activeEvent, location: updatedLocation });
+      gun.get(activeEvent.id).get('location').put(updatedLocation);
     }
   };
 
   return (
     <div className="min-h-screen px-4 py-12 md:py-20 flex flex-col items-center max-w-[1700px] mx-auto overflow-x-hidden">
+      {/* Badge de Synchronisation */}
+      <div className="fixed top-6 right-6 z-[60] flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-md rounded-full shadow-lg border border-emerald-100">
+        <div className="w-2 h-2 rounded-full bg-emerald-500 sync-indicator"></div>
+        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Base partagée</span>
+      </div>
+
       <header className="w-full text-center mb-24 relative">
         <div className="absolute -top-20 left-1/4 w-72 h-72 bg-emerald-300/20 rounded-full blur-[100px] -z-10 animate-pulse"></div>
         <div className="absolute -top-10 right-1/4 w-72 h-72 bg-indigo-300/20 rounded-full blur-[100px] -z-10 animate-pulse" style={{ animationDelay: '1s' }}></div>
@@ -130,7 +169,7 @@ const App: React.FC = () => {
           Day <span className="bg-clip-text text-transparent bg-gradient-to-br from-emerald-400 via-teal-500 to-lime-500 inline-block drop-shadow-sm">🧵</span>
         </h1>
         <p className="text-slate-400 mb-12 font-bold tracking-[0.2em] uppercase text-[10px]">
-          Planifiez vos moments d'exception
+          Planifiez vos moments d'exception ensemble
         </p>
 
         <div className="relative group max-w-5xl mx-auto">
@@ -257,7 +296,8 @@ const App: React.FC = () => {
           onUpdateDescription={(val) => handleUpdateField(activeEvent.id, 'description', val)}
           onUpdateMaxParticipants={(val) => {
             handleUpdateField(activeEvent.id, 'maxParticipants', val);
-            setActiveEvent({ ...activeEvent, maxParticipants: val });
+            // On met à jour l'event local pour refléter instantanément dans la modale
+            setActiveEvent(prev => prev ? { ...prev, maxParticipants: val } : null);
           }}
         />
       )}

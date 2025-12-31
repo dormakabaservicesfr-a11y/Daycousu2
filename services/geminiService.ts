@@ -8,7 +8,12 @@ export const generateEventIdeas = async (
   userProvidedName?: string,
   usedIcons: string[] = []
 ): Promise<GeminiEventResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("L'API Key n'est pas configurée correctement sur le serveur.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   
   const basePrompt = userProvidedName 
     ? `L'utilisateur veut organiser un événement nommé "${userProvidedName}" pour le mois de ${month} de type "${type}".`
@@ -21,7 +26,7 @@ export const generateEventIdeas = async (
   const prompt = `${basePrompt} 
     Propose une date précise, une description attrayante (2 phrases max), un émoji unique, et un nombre de participants (4 par défaut). 
     ${exclusionPrompt}
-    Réponds uniquement au format JSON pur sans balises Markdown.`;
+    Réponds uniquement au format JSON pur.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -43,31 +48,33 @@ export const generateEventIdeas = async (
       },
     });
 
-    // Nettoyage de la réponse pour extraire le JSON valide
     const text = response.text || "{}";
+    // Nettoyage agressif du JSON si l'IA renvoie du Markdown malgré les consignes
     const cleanedJson = text.replace(/```json|```/g, "").trim();
-    const result = JSON.parse(cleanedJson);
-    
-    return result;
-  } catch (error) {
-    console.error("Gemini API error:", error);
+    return JSON.parse(cleanedJson);
+  } catch (error: any) {
+    console.error("Gemini API Error (Idea Generation):", error);
+    // Fallback robuste pour que le bouton "Créer" fonctionne toujours
     return {
       title: userProvidedName || `${type} de ${month}`,
-      date: `15 ${month}`,
-      description: "Un moment convivial à ne pas manquer !",
-      icon: "✨",
+      date: `Le 15 ${month}`,
+      description: "Un événement généré automatiquement faute de connexion au cerveau de l'IA.",
+      icon: "📅",
       maxParticipants: 4
     };
   }
 };
 
 export const suggestLocation = async (eventTitle: string, month: string): Promise<EventLocation | undefined> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) return undefined;
+
+  const ai = new GoogleGenAI({ apiKey });
   
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Propose un lieu emblématique pour "${eventTitle}" en ${month}.`,
+      contents: `Propose un lieu précis pour l'événement "${eventTitle}" en ${month}.`,
       config: {
         tools: [{ googleMaps: {} }],
       },
@@ -82,10 +89,8 @@ export const suggestLocation = async (eventTitle: string, month: string): Promis
         mapsUri: mapsChunk.maps.uri
       };
     }
-    
-    return { name: "Lieu à définir" };
   } catch (error) {
-    console.error("Location suggestion error:", error);
-    return { name: "Lieu à définir" };
+    console.warn("Location suggestion skipped due to error:", error);
   }
+  return { name: "Lieu à définir" };
 };
